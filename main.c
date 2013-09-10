@@ -8,7 +8,7 @@
 #endif
 
 #ifndef TARGET_FREQUENCY
-#define TARGET_FREQUENCY 15964200
+#define TARGET_FREQUENCY 15964200L
 #endif
 
 /* The loop takes 4 cycles per iteration, so divide delay by 4. */
@@ -23,8 +23,6 @@
 #define OUT_MAX (0xb1)
 #define OUT_MIN (0xa1)
 #define OUT_FINISH (0xcc)
-
-#define BIT_DURATION (TARGET_FREQUENCY / BAUD)
 
 
 /* Using P2.6 and P2.7. */
@@ -164,10 +162,11 @@ int main(void){
 	P2IE = RX_BIT;
 	P2IFG = 0;
 
+	/* Don't have a last estimate, so set it to max (frequency itself) */
+	uint32_t last_diff = 0xFFFFFFFFL;
 	uint8_t tx = OUT_START;
 	while(1){
 
-		/* Note that before */
 		BCSCTL1 = CALBC1_1MHZ;
 		DCOCTL = CALDCO_1MHZ;
 		xmit_char(tx);
@@ -197,21 +196,50 @@ int main(void){
 			unsigned bdur = cnts[i] - cnts[i - 1];
 			avg += bdur;
 		}
+
+		/* division filters the "noise" from time difference readings. */
     avg /= BIT_COUNT - 1;
 
-		/* Return the difference in bit duration, in sign magnitude form. */
-    if( avg == BIT_DURATION ) {
+		/* Extrapolate what target frequency would be based on this sampling. */
+		uint32_t estimated_freq = avg;
+		estimated_freq *= BAUD;
+
+		/* Compare estimate and target; calculate diff accordingly */
+		uint8_t estimate_greater =
+			(estimated_freq > TARGET_FREQUENCY) ? 1 : 0;
+		uint32_t diff = estimate_greater
+			? (estimated_freq - TARGET_FREQUENCY)
+			: (TARGET_FREQUENCY - estimated_freq);
+
+		/* Since estimate is scaled by BAUD then
+		 * we should be able to have an error less than BAUD.
+		 * If last estimate was better than current estimate, declare it
+		 * the winner.
+		 * */
+		if(diff < BAUD && diff > last_diff){
+			/* Last estimate was better, reverse what we did. */
+			if(tx == OUT_INCREMENT)
+				decrement_values();
+			else if(tx == OUT_DECREMENT)
+				increment_values();
+			else{
+				/* FIXME If we didn't increment or decrement, wtf did we do? */
+			}
 			tx = OUT_FINISH;
 			finished = 1;
-    }
-    else if ( avg < BIT_DURATION ) {
-			/* Speed up the DCO. */
-			tx = increment_values();
-    }
-    else {
-			/* Slow down the DCO. */
-			tx = decrement_values();
-    }
+		}
+		else{
+			last_diff = diff;
+			/* Getting there, take action based on sign of diff. */
+			if(estimate_greater){
+				/* Slow down the DCO. */
+				tx = decrement_values();
+			}
+			else{
+				/* Speed up the DCO. */
+				tx = increment_values();
+			}
+		}
 	}
 
 	/* Output the calibrated values at 9600 baud. */
