@@ -1,5 +1,36 @@
 When your micro's main clock frequency is software configurable, why not set it exactly to what you want?
 
+REQUIREMENTS:
+-------------
+libftdi
+mspgcc
+mspdebug
+
+USAGE:
+------
+
+By default, this will determine the constants for 16MHz.
+1) Download, extract, etc and run make. If this does not work, check that the requirements are fulfilled.
+2) Flash the program to your chip, something like (for the LaunchPad)
+
+mspdebug rf2500 'prog UART_CALIBRATION.elf'
+
+3) Run the host calibration program
+
+./host_calibrate
+
+4) You will see a long stream of characters. See the source for details.
+At the end you will see the DCO and BCSCTL1 constants printed.
+
+5) If you want to recalibrate, reset your micro via a reset button or
+
+mspdebug rf2500 'reset'
+
+and run step 3 again.
+
+BACKGROUND:
+-----------
+
 This is a combination of two programs, one on the host, and one on the micro, that communicate to each other to get the DCO to a target frequency.
 
 Supported host hardware:
@@ -15,4 +46,5 @@ This work is based on goldilocks.cpp from Rick Kimball's fabooh project
 https://github.com/RickKimball/msp430_code/blob/master/fabooh/examples/serial/dco_calibrate/goldilocks.cpp
 
 LICENSING:
+----------
 Please see source files.
