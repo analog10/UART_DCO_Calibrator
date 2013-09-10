@@ -24,10 +24,7 @@
 #define OUT_MIN (0xa1)
 #define OUT_FINISH (0xcc)
 
-/* Added a scale fctor of 2 because things seemed to work that way.
- * When I originally tried the method, I was getting half the intended
- * frequency. */
-#define BIT_DURATION (2 * TARGET_FREQUENCY / BAUD)
+#define BIT_DURATION (TARGET_FREQUENCY / BAUD)
 
 
 /* Using P2.6 and P2.7. */
@@ -259,7 +256,11 @@ void Port_2(void){
   	cnts[bit_indx] = v - OTHER_START_BIAS;
 	}
 
+	/* Switch edge trigger so we get called on next transition */
+	P2IES ^= RX_BIT;
+
   if ( ++bit_indx == BIT_COUNT ) { // last one? wake main line
+		P2IES = RX_BIT;
     LPM0_EXIT;
   }
 
