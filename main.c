@@ -8,7 +8,7 @@
 #endif
 
 #ifndef TARGET_FREQUENCY
-#define TARGET_FREQUENCY 15964200L
+#define TARGET_FREQUENCY 16000000L
 #endif
 
 /* The loop takes 4 cycles per iteration, so divide delay by 4. */
