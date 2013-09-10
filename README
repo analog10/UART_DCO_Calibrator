@@ -1,0 +1,11 @@
+When your micro's main clock frequency is software configurable, why not set it exactly to what you want?
+
+This is a combination of two programs, one on the host, and one on the micro, that communicate to each other to get the DCO to a target frequency.
+
+Supported host hardware:
+FTDI USB Serial adapters
+
+Supported micros:
+MSP430 series
+
+Basically you have to modify the source to set the target frequency you want. If your FTDI adapter is not based on FT230X, you will have to change the USB ID to your adapter's ID.
