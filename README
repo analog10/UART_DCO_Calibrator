@@ -13,3 +13,6 @@ Basically you have to modify the source to set the target frequency you want. If
 
 This work is based on goldilocks.cpp from Rick Kimball's fabooh project
 https://github.com/RickKimball/msp430_code/blob/master/fabooh/examples/serial/dco_calibrate/goldilocks.cpp
+
+LICENSING:
+Please see source files.

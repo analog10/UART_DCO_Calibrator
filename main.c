@@ -1,5 +1,4 @@
-/* License: Would like to be public domain, but still contacting original source
- * of idea to clarify license. */
+/* This file is licensed under GPL3, as a derivative work from fabooh. */
 #include <stdint.h>
 #include <msp430.h>
 
