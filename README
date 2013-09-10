@@ -9,6 +9,8 @@ mspdebug
 USAGE:
 ------
 
+NOTE: On MSP430, UART is bitbanged through pins 2.6 and 2.7. You will probably need to modify this pin mapping.
+
 By default, this will determine the constants for 16MHz.
 1) Download, extract, etc and run make. If this does not work, check that the requirements are fulfilled.
 2) Flash the program to your chip, something like (for the LaunchPad)
