@@ -1,0 +1,4 @@
+UART_CALIBRATE.*
+*.o
+*.d
+host_calibrate
