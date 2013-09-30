@@ -2,13 +2,11 @@
 #include <stdint.h>
 #include <msp430.h>
 
+#include "protocol.h"
+
 /* Configuration: */
 #ifndef BAUD
 #define BAUD 9600
-#endif
-
-#ifndef TARGET_FREQUENCY
-#define TARGET_FREQUENCY 16000000L
 #endif
 
 /* The loop takes 4 cycles per iteration, so divide delay by 4. */
@@ -16,21 +14,25 @@
 #define BIT_DELAY (TICKS_PER_BIT >> 2)
 #define BIT_COUNT 10
 
-/* What program outputs to host. */
-#define OUT_START (0xee)
-#define OUT_INCREMENT (0xb0)
-#define OUT_DECREMENT (0xa0)
-#define OUT_MAX (0xb1)
-#define OUT_MIN (0xa1)
-#define OUT_FINISH (0xcc)
-
-
-/* Using P2.6 and P2.7. */
 enum {
 	TX_BIT = BIT7
 	,RX_BIT = BIT6
 };
 
+/* Possible states. */
+enum {
+	/** @brief Host is sending configuration data (target frequency). */
+	ST_CONFIGURE
+	,ST_SURVEY
+	,ST_HOME
+	,ST_FINISHED
+};
+
+/* This has a very special encoding. */
+volatile uint16_t one_count;
+
+/* Host configured target frequency. */
+uint32_t cfg_target_frequency = (360L * 44100L);
 
 /* Listening state to count cycles. */
 volatile uint16_t cnts[BIT_COUNT];
@@ -40,9 +42,8 @@ volatile unsigned bit_indx;
 uint8_t dco;
 uint8_t bcs;
 
-/* This variable, when set, kills the calibration loop. */
-uint8_t finished = 0;
-
+/* Current operating state. */
+uint8_t state = ST_CONFIGURE;
 
 
 /* Increment the dco and bcs values. */
@@ -56,7 +57,7 @@ uint8_t increment_values(void){
 			return OUT_INCREMENT;
 		}
 		else{
-			finished = 1;
+			state = ST_FINISHED;
 
 			/* Reached maximum speed, cannot go further. */
 			return OUT_MAX;
@@ -78,7 +79,7 @@ uint8_t decrement_values(void){
 			return OUT_DECREMENT;
 		}
 		else{
-			finished = 1;
+			state = ST_FINISHED;
 
 			/* Reached minimum speed, cannot go further. */
 			return OUT_MIN;
@@ -131,6 +132,11 @@ void xmit_char(uint8_t val){
 	}
 }
 
+static uint16_t s_counter = 0;
+void br(){
+	++s_counter;
+}
+
 int main(void){
 	/* Disable watchdog. */
 	WDTCTL = WDTPW | WDTHOLD;
@@ -150,12 +156,14 @@ int main(void){
 
 	/* Setup RX_BIT, our UART input bit. */
 	P2DIR = TX_BIT;
-	P2OUT = TX_BIT | RX_BIT;
+	P2OUT = 0;
+	P2OUT |= TX_BIT;
+	P2OUT |= RX_BIT;
 	P2REN = ~TX_BIT;
 	P2IES = RX_BIT;
 
 	/* Enable SMCLK on P1.4 */
-	P1OUT = 0x00;
+	P1OUT &= ~BIT4;
 	P1DIR = BIT4;
 	P1SEL = BIT4;
 
@@ -163,6 +171,7 @@ int main(void){
 	P2IFG = 0;
 
 	/* Don't have a last estimate, so set it to max (frequency itself) */
+	uint32_t estimated_freq = 0;
 	uint32_t last_diff = 0xFFFFFFFFL;
 	uint8_t tx = OUT_START;
 	while(1){
@@ -173,22 +182,100 @@ int main(void){
 
 		/* If we are finished, stop listening to the RX_BIT
 		 * and get out of this loop. */
-		if(finished){
-			P2IE = 0;
-			P2IFG = 0;
-			break;
+		if(ST_FINISHED == state){
+			/* Frequency estimate. */
+			xmit_char(estimated_freq & 0xFF);
+			estimated_freq >>= 8;
+			xmit_char(estimated_freq & 0xFF);
+			estimated_freq >>= 8;
+			xmit_char(estimated_freq & 0xFF);
+			estimated_freq >>= 8;
+			xmit_char(estimated_freq & 0xFF);
+
+			/* Estimated error from true frequency. */
+			xmit_char(last_diff & 0xFF);
+			last_diff >>= 8;
+			xmit_char(last_diff & 0xFF);
+			last_diff >>= 8;
+			xmit_char(last_diff & 0xFF);
+			last_diff >>= 8;
+			xmit_char(last_diff & 0xFF);
+
+			/* Output the calibrated values at 9600 baud. */
+			xmit_char(dco);
+			xmit_char(bcs);
+
+			state = ST_CONFIGURE;
 		}
 
-		/* Prepare to listen at the test frequency. */
-		BCSCTL1 = bcs;
-		DCOCTL = dco;
-    bit_indx = 0;
-		P2IFG = 0;
+		while(1){
+			/* Prepare to listen at the test frequency. */
+			BCSCTL1 = bcs;
+			DCOCTL = dco;
+			bit_indx = 0;
+			one_count = 0;
+			for(unsigned i = 0; i < BIT_COUNT; ++i)
+				cnts[i] = 0;
+			P2IFG = 0;
 
-		/* Now wait for the 'U' from the host */
-		__eint();
-    LPM0;
-		__dint();
+			/* Now wait for host char */
+			__eint();
+			LPM0;
+			__dint();
+
+			if(ST_CONFIGURE == state){
+				/* Assume good. */
+				uint8_t reply = OUT_RX_ACK | one_count;
+
+				/* one_count is now relevant. */
+				switch(one_count){
+					case 1:
+						/* Shift a 1 into req. */
+						cfg_target_frequency <<= 1;
+						cfg_target_frequency |= 1;
+						break;
+
+					case 2:
+						/* Shift a 0 into req. */
+						cfg_target_frequency <<= 1;
+						break;
+
+					case 3:
+						/* Initiate DCO calibration. */
+						state = ST_SURVEY;
+						br();
+						break;
+
+					case 4:
+						/* Reset to 0. */
+						cfg_target_frequency = 0;
+						break;
+
+					case 5:
+						/* Reserved behaviour. Maybe change to a different register?
+						 * Or echo register? who knows. */
+						break;
+
+					default:
+						reply = OUT_RX_ERR | (one_count & 0xF);
+						break;
+				}
+
+				BCSCTL1 = CALBC1_1MHZ;
+				DCOCTL = CALDCO_1MHZ;
+				xmit_char(reply);
+			}
+			else{
+				/* If received all 10 transitions then proceed to estimate. */
+				if(bit_indx == BIT_COUNT)
+					break;
+
+				/* Otherwise timed out while receiving char. Let the host know. */
+				BCSCTL1 = CALBC1_1MHZ;
+				DCOCTL = CALDCO_1MHZ;
+				xmit_char(OUT_RX_ERR);
+			}
+		}
 
 		/* Lifted from goldilocks.cpp */
     uint16_t i, avg=0;
@@ -201,15 +288,15 @@ int main(void){
     avg /= BIT_COUNT - 1;
 
 		/* Extrapolate what target frequency would be based on this sampling. */
-		uint32_t estimated_freq = avg;
+		estimated_freq = avg;
 		estimated_freq *= BAUD;
 
 		/* Compare estimate and target; calculate diff accordingly */
 		uint8_t estimate_greater =
-			(estimated_freq > TARGET_FREQUENCY) ? 1 : 0;
+			(estimated_freq > cfg_target_frequency) ? 1 : 0;
 		uint32_t diff = estimate_greater
-			? (estimated_freq - TARGET_FREQUENCY)
-			: (TARGET_FREQUENCY - estimated_freq);
+			? (estimated_freq - cfg_target_frequency)
+			: (cfg_target_frequency - estimated_freq);
 
 		/* Since estimate is scaled by BAUD then
 		 * we should be able to have an error less than BAUD.
@@ -226,7 +313,7 @@ int main(void){
 				/* FIXME If we didn't increment or decrement, wtf did we do? */
 			}
 			tx = OUT_FINISH;
-			finished = 1;
+			state = ST_FINISHED;
 		}
 		else{
 			last_diff = diff;
@@ -241,12 +328,6 @@ int main(void){
 			}
 		}
 	}
-
-	/* Output the calibrated values at 9600 baud. */
-	BCSCTL1 = CALBC1_1MHZ;
-	DCOCTL = CALDCO_1MHZ;
-	xmit_char(dco);
-	xmit_char(bcs);
 
 	/* Run the processor at the new frequency, so that the
 	 * SMCLK frequency can be measured by oscope. */
@@ -273,7 +354,7 @@ void Port_2(void){
   if(!bit_indx){
 		/* Reset the timer.
 		 * Continuous up. */
-		TA0CTL = TASSEL_2 | ID_0 | MC_2 | TACLR;
+		TA0CTL = TASSEL_2 | ID_0 | MC_2 | TACLR | TAIE;
 		TAR = INIT_START_BIAS;
 
 		/* By definition, first count is at 0 */
@@ -282,15 +363,33 @@ void Port_2(void){
 	else{
 		register uint16_t v = TAR;
   	cnts[bit_indx] = v - OTHER_START_BIAS;
+		if(P2IN & RX_BIT)
+			++one_count;
 	}
 
 	/* Switch edge trigger so we get called on next transition */
 	P2IES ^= RX_BIT;
 
   if ( ++bit_indx == BIT_COUNT ) { // last one? wake main line
+		/* Disable timer interrupt. */
+		TA0CTL &= ~(TAIE | TAIFG);
 		P2IES = RX_BIT;
     LPM0_EXIT;
   }
 
 	P2IFG = 0;
+}
+
+__attribute__((interrupt(TIMER0_A1_VECTOR)))
+void timeout_detect(void){
+	/* Clear interrupt flag. */
+  volatile uint16_t resetTAIVIFG;
+  resetTAIVIFG=TA0IV;(void)resetTAIVIFG;
+
+	if(bit_indx < BIT_COUNT){
+		/* Timed out. At 16MHz, the timeout is 4ms, which should be plenty.
+		 * Reset edge direction and wake up cpu. */
+		P2IES = RX_BIT;
+    LPM0_EXIT;
+	}
 }

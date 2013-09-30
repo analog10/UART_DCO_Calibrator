@@ -83,8 +83,8 @@
  .SILENT:
  .PHONY:	clean
 
- host_calibrate: host_calibrate.c
-	$(HOST_CC) host_calibrate.c -g -o host_calibrate -lftdi
+ host_calibrate: host_calibrate.c protocol.h
+	$(HOST_CC) host_calibrate.c -g -o host_calibrate
 
  clean:
 	-$(RM) $(OBJECTS)
