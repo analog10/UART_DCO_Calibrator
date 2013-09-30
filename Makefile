@@ -84,7 +84,7 @@
  .PHONY:	clean
 
  host_calibrate: host_calibrate.c protocol.h
-	$(HOST_CC) host_calibrate.c -g -o host_calibrate
+	$(HOST_CC) host_calibrate.c -g -o host_calibrate -lm
 
  clean:
 	-$(RM) $(OBJECTS)

@@ -6,6 +6,7 @@
 
 #define _BSD_SOURCE
 #include <endian.h>
+#include <math.h>
 #include <termios.h>
 #include <string.h>
 #include <stdio.h>
@@ -72,7 +73,7 @@ int xmit_recv(int fd, char* dest, char send){
 
 int main(int argc, char **argv) {
 	int ret;
-	unsigned baudrate = 9600;
+	unsigned baudrate = 4800;
 	uint32_t target_freq = 16000000;
 
 	if(argc < 2){
@@ -284,15 +285,15 @@ int main(int argc, char **argv) {
 		if(ret)
 			return ret;
 
-		if(OUT_INCREMENT == rx){
+		if(OUT_MOD_INCREMENT == rx){
 		}
-		else if(OUT_DECREMENT == rx){
+		else if(OUT_MOD_DECREMENT == rx){
 		}
 		else if(OUT_FINISH == rx){
 			/* Read dco, bcs values. */
 			struct {
 				uint32_t estimate;
-				uint32_t last_diff;
+				uint32_t variance;
 				uint8_t dco;
 				uint8_t bcs;
 			} result;
@@ -305,9 +306,11 @@ int main(int argc, char **argv) {
 			}
 
 			result.estimate = le32toh(result.estimate);
-			fprintf(stderr, "DCO  BCS1CTL  ESTIMATE     ERROR\n");
-			printf("%02hhx   %02hhx       %8u  %8u\n"
-				,result.dco ,result.bcs ,result.estimate ,result.last_diff);
+			fprintf(stderr, "DCO  BCS1CTL  ESTIMATE  VARIANCE\n");
+			printf("%02hhx   %02hhx       %8u  %8.1lf\n"
+				,result.dco ,result.bcs ,result.estimate ,(double)result.variance / 10.0);
+
+			fprintf(stderr, "\n\nSTDDEV: %lf\n", sqrt((double)result.variance / 10.0));
 			break;
 		}
 		else{

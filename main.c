@@ -1,4 +1,5 @@
 /* This file is licensed under GPL3, as a derivative work from fabooh. */
+/* Developed by Dave Bender, https://analog10.com  */
 #include <stdint.h>
 #include <msp430.h>
 
@@ -6,7 +7,7 @@
 
 /* Configuration: */
 #ifndef BAUD
-#define BAUD 9600
+#define BAUD 4800
 #endif
 
 /* The loop takes 4 cycles per iteration, so divide delay by 4. */
@@ -33,6 +34,8 @@ volatile uint16_t one_count;
 
 /* Host configured target frequency. */
 uint32_t cfg_target_frequency = (360L * 44100L);
+uint32_t last_estimate = 0;
+uint16_t last_var = 0;
 
 /* Listening state to count cycles. */
 volatile uint16_t cnts[BIT_COUNT];
@@ -47,14 +50,14 @@ uint8_t state = ST_CONFIGURE;
 
 
 /* Increment the dco and bcs values. */
-uint8_t increment_values(void){
+uint8_t increment_values(uint8_t last){
 
 	/* If DCO is at maximum value, increase the RSEL. */
 	if(dco == 0xFF){
 		if((bcs & 0x0F) < 0x0F){
 			++bcs;
 			dco = 0;
-			return OUT_INCREMENT;
+			return OUT_MOD_INCREMENT;
 		}
 		else{
 			state = ST_FINISHED;
@@ -65,18 +68,18 @@ uint8_t increment_values(void){
 	}
 	else{
 		++dco;
-		return OUT_INCREMENT;
+		return OUT_MOD_INCREMENT;
 	}
 }
 
 /* Decrement the dco and bcs values. */
-uint8_t decrement_values(void){
+uint8_t decrement_values(uint8_t last){
 	/* If DCO is at minimum value, decrease the RSEL. */
 	if(dco == 0x0){
 		if((bcs & 0x0F) > 0x0){
 			--bcs;
 			dco = 0xFF;
-			return OUT_DECREMENT;
+			return OUT_MOD_DECREMENT;
 		}
 		else{
 			state = ST_FINISHED;
@@ -87,7 +90,7 @@ uint8_t decrement_values(void){
 	}
 	else{
 		--dco;
-		return OUT_DECREMENT;
+		return OUT_MOD_DECREMENT;
 	}
 }
 
@@ -184,22 +187,22 @@ int main(void){
 		 * and get out of this loop. */
 		if(ST_FINISHED == state){
 			/* Frequency estimate. */
-			xmit_char(estimated_freq & 0xFF);
-			estimated_freq >>= 8;
-			xmit_char(estimated_freq & 0xFF);
-			estimated_freq >>= 8;
-			xmit_char(estimated_freq & 0xFF);
-			estimated_freq >>= 8;
-			xmit_char(estimated_freq & 0xFF);
+			xmit_char(last_estimate & 0xFF);
+			last_estimate >>= 8;
+			xmit_char(last_estimate & 0xFF);
+			last_estimate >>= 8;
+			xmit_char(last_estimate & 0xFF);
+			last_estimate >>= 8;
+			xmit_char(last_estimate & 0xFF);
 
 			/* Estimated error from true frequency. */
-			xmit_char(last_diff & 0xFF);
-			last_diff >>= 8;
-			xmit_char(last_diff & 0xFF);
-			last_diff >>= 8;
-			xmit_char(last_diff & 0xFF);
-			last_diff >>= 8;
-			xmit_char(last_diff & 0xFF);
+			xmit_char(last_var & 0xFF);
+			last_var >>= 8;
+			xmit_char(last_var & 0xFF);
+			last_var >>= 8;
+			xmit_char(last_var & 0xFF);
+			last_var >>= 8;
+			xmit_char(last_var & 0xFF);
 
 			/* Output the calibrated values at 9600 baud. */
 			xmit_char(dco);
@@ -249,6 +252,9 @@ int main(void){
 					case 4:
 						/* Reset to 0. */
 						cfg_target_frequency = 0;
+						last_diff = 0xFFFFFFFFL;
+						estimated_freq = 0;
+						last_var = 0;
 						break;
 
 					case 5:
@@ -287,6 +293,7 @@ int main(void){
 		/* division filters the "noise" from time difference readings. */
     avg /= BIT_COUNT - 1;
 
+
 		/* Extrapolate what target frequency would be based on this sampling. */
 		estimated_freq = avg;
 		estimated_freq *= BAUD;
@@ -298,33 +305,44 @@ int main(void){
 			? (estimated_freq - cfg_target_frequency)
 			: (cfg_target_frequency - estimated_freq);
 
+		uint16_t var = 0;
+		for(i = 1; i < bit_indx; i++) {
+			uint16_t d = cnts[i] - cnts[i - 1];
+			d = d > avg ? d - avg : avg - d;
+			var += d * d;
+		}
+
 		/* Since estimate is scaled by BAUD then
 		 * we should be able to have an error less than BAUD.
 		 * If last estimate was better than current estimate, declare it
 		 * the winner.
 		 * */
-		if(diff < BAUD && diff > last_diff){
+		if(last_diff < BAUD && diff > last_diff){
 			/* Last estimate was better, reverse what we did. */
-			if(tx == OUT_INCREMENT)
-				decrement_values();
-			else if(tx == OUT_DECREMENT)
-				increment_values();
+			if((tx & 0xF) == OUT_MOD_INCREMENT)
+				decrement_values(tx);
+			else if((tx & 0xF) == OUT_MOD_DECREMENT)
+				increment_values(tx);
 			else{
 				/* FIXME If we didn't increment or decrement, wtf did we do? */
 			}
+
 			tx = OUT_FINISH;
 			state = ST_FINISHED;
 		}
 		else{
 			last_diff = diff;
+			last_estimate = estimated_freq;
+			last_var = var;
+
 			/* Getting there, take action based on sign of diff. */
 			if(estimate_greater){
 				/* Slow down the DCO. */
-				tx = decrement_values();
+				tx = decrement_values(tx);
 			}
 			else{
 				/* Speed up the DCO. */
-				tx = increment_values();
+				tx = increment_values(tx);
 			}
 		}
 	}
