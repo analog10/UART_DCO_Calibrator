@@ -204,11 +204,6 @@ void xmit_char(uint8_t val){
 	}
 }
 
-static uint16_t s_counter = 0;
-void br(){
-	++s_counter;
-}
-
 int main(void){
 	/* Disable watchdog. */
 	WDTCTL = WDTPW | WDTHOLD;
