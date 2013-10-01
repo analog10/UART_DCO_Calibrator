@@ -285,9 +285,13 @@ int main(int argc, char **argv) {
 		if(ret)
 			return ret;
 
-		if(OUT_MOD_INCREMENT == rx){
+		if(OUT_MIN == rx){
+			fprintf(stderr, "Cannot reach frequency; too low\n");
+			break;
 		}
-		else if(OUT_MOD_DECREMENT == rx){
+		else if(OUT_MAX == rx){
+			fprintf(stderr, "Cannot reach frequency; too high\n");
+			break;
 		}
 		else if(OUT_FINISH == rx){
 			/* Read dco, bcs values. */
@@ -301,17 +305,20 @@ int main(int argc, char **argv) {
 			unsigned count = 0;
 			while(count < 10){
 				ret = read(fd, (uint8_t*)(&result) + count, sizeof(result)  - count);
-				fprintf(stderr, "Read back %i\n", ret);
 				count += ret;
 			}
 
 			result.estimate = le32toh(result.estimate);
-			fprintf(stderr, "DCO  BCS1CTL  ESTIMATE  VARIANCE\n");
+			fprintf(stderr, "\n\nDCO  BCS1CTL  ESTIMATE  VARIANCE\n");
 			printf("%02hhx   %02hhx       %8u  %8.1lf\n"
 				,result.dco ,result.bcs ,result.estimate ,(double)result.variance / 10.0);
 
 			fprintf(stderr, "\n\nSTDDEV: %lf\n", sqrt((double)result.variance / 10.0));
 			break;
+		}
+		else if(OUT_MOD_INCREMENT == (rx & 0xF0)){
+		}
+		else if(OUT_MOD_DECREMENT == (rx & 0xF0)){
 		}
 		else{
 			fprintf(stderr, "BAD RX %02hhx\n", rx);

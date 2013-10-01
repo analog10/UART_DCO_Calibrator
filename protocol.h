@@ -10,3 +10,4 @@
 #define OUT_FINISH (0xcc)
 #define OUT_RX_ACK (0xd0)
 #define OUT_RX_ERR (0xe0)
+#define OUT_OP_ERR (0xef)

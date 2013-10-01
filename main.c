@@ -52,46 +52,115 @@ uint8_t state = ST_CONFIGURE;
 /* Increment the dco and bcs values. */
 uint8_t increment_values(uint8_t last){
 
-	/* If DCO is at maximum value, increase the RSEL. */
-	if(dco == 0xFF){
+	if(OUT_START == last || OUT_RSEL_INCREMENT == last){
+		/* Increment by RSEL. */
 		if((bcs & 0x0F) < 0x0F){
 			++bcs;
-			dco = 0;
-			return OUT_MOD_INCREMENT;
+			return OUT_RSEL_INCREMENT;
 		}
 		else{
-			state = ST_FINISHED;
-
-			/* Reached maximum speed, cannot go further. */
-			return OUT_MAX;
+			/* Try incrementing the DCO. */
+			dco += 0x20;
+			return OUT_DCO_INCREMENT;
 		}
 	}
-	else{
+	else if(OUT_RSEL_DECREMENT == last){
+		/* Our last operation was a decrement, so the local minimum is
+		 * at incremented RSEL value. Decrement the DCO though.
+		 * Report it as a net decrease in DCO value. */
+		++bcs;
+		return OUT_DCO_DECREMENT;
+	}
+
+	if(OUT_DCO_INCREMENT == last){
+		/* Changing mod bits at maximum DCO has no effect, but
+		 * for simplicity sake just do it anyway.*/
+		if((dco & 0xE0) == 0xE0){
+			++dco;
+			return OUT_MOD_INCREMENT;
+		}
+		dco += 0x20;
+		return OUT_DCO_INCREMENT;
+	}
+	else if(OUT_DCO_DECREMENT == last){
+		/* Local minimum is in the MOD bits.
+		 * Report net MOD decrease. */
+		dco += 0x20;
+		--dco;
+		return OUT_MOD_DECREMENT;
+	}
+
+	if(OUT_MOD_INCREMENT == last){
+		if((dco & 0x1F) == 0x1F)
+			return OUT_MAX;
 		++dco;
 		return OUT_MOD_INCREMENT;
 	}
+	else if(OUT_MOD_DECREMENT == last){
+		/* Go back to the previous mod value. */
+		++dco;
+		return OUT_MOD_INCREMENT;
+	}
+
+	/* Otherwise, this is a bad function call. */
+	return OUT_OP_ERR;
 }
 
 /* Decrement the dco and bcs values. */
 uint8_t decrement_values(uint8_t last){
-	/* If DCO is at minimum value, decrease the RSEL. */
-	if(dco == 0x0){
-		if((bcs & 0x0F) > 0x0){
+
+	if(OUT_START == last || OUT_RSEL_DECREMENT == last){
+		/* Decrement by RSEL. */
+		if((bcs & 0x0F) > 0x00){
 			--bcs;
-			dco = 0xFF;
-			return OUT_MOD_DECREMENT;
+			return OUT_RSEL_DECREMENT;
 		}
 		else{
-			state = ST_FINISHED;
-
-			/* Reached minimum speed, cannot go further. */
-			return OUT_MIN;
+			/* Try decrementing the DCO. */
+			dco -= 0x20;
+			return OUT_DCO_DECREMENT;
 		}
 	}
-	else{
+	else if(OUT_RSEL_INCREMENT == last){
+		/* Our last operation was a increment, so the local minimum is
+		 * at decremented RSEL value. Increment the DCO though.
+		 * Report it as a net increase in DCO value. */
+		--bcs;
+		return OUT_DCO_INCREMENT;
+	}
+
+	if(OUT_DCO_DECREMENT == last){
+		/* Check DCO bound. */
+		if((dco & 0xE0) == 0x00){
+			/* Decrement the mod value. */
+			--dco;
+			return OUT_MOD_DECREMENT;
+		}
+		dco -= 0x20;
+		return OUT_DCO_DECREMENT;
+	}
+	else if(OUT_DCO_INCREMENT == last){
+		/* Local minimum is in the MOD bits.
+		 * Report net MOD increase. */
+		dco -= 0x20;
+		++dco;
+		return OUT_MOD_INCREMENT;
+	}
+
+	if(OUT_MOD_DECREMENT == last){
+		if((dco & 0x1F) == 0x00)
+			return OUT_MIN;
 		--dco;
 		return OUT_MOD_DECREMENT;
 	}
+	else if(OUT_MOD_INCREMENT == last){
+		/* Go back to the previous mod value. */
+		--dco;
+		return OUT_MOD_DECREMENT;
+	}
+
+	/* Otherwise, this is a bad function call. */
+	return OUT_OP_ERR;
 }
 
 /* Bit-banged serial. Yes this is ugly.
@@ -150,9 +219,10 @@ int main(void){
 	BCSCTL2 &= ~(DIVS_0);
 	BCSCTL3 |= LFXT1S_2; 
 
-	/* Save initial clock settings. */
-	dco = DCOCTL;
-	bcs = BCSCTL1;
+	/* Initialize to almost center of frequency range.
+	 * Start at lowest DCO. */
+	dco = 0x00 | 0x10;
+	bcs = (BCSCTL1 & 0xF0) | 0x7;
 
 	/* Disable external crystal. */
 	P2SEL = 0;
@@ -246,7 +316,6 @@ int main(void){
 					case 3:
 						/* Initiate DCO calibration. */
 						state = ST_SURVEY;
-						br();
 						break;
 
 					case 4:
@@ -343,6 +412,11 @@ int main(void){
 			else{
 				/* Speed up the DCO. */
 				tx = increment_values(tx);
+			}
+
+			if(OUT_MAX == tx || OUT_MIN == tx){
+				/* Reached extreme, cannot go any further. */
+				state = ST_CONFIGURE;
 			}
 		}
 	}
