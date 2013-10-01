@@ -2,7 +2,6 @@ When your micro's main clock frequency is software configurable, why not set it 
 
 REQUIREMENTS:
 -------------
-libftdi
 mspgcc
 mspdebug
 
@@ -36,15 +35,12 @@ BACKGROUND:
 This is a combination of two programs, one on the host, and one on the micro, that communicate to each other to get the DCO to a target frequency.
 
 Supported host hardware:
-FTDI USB Serial adapters
+Any Serial interface
 
 Supported micros:
 MSP430 series
 
-Basically you have to modify the source to set the target frequency you want. If your FTDI adapter is not based on FT230X, you will have to change the USB ID to your adapter's ID.
-
-
-This work is based on goldilocks.cpp from Rick Kimball's fabooh project
+This work is inspired by goldilocks.cpp from Rick Kimball's fabooh project
 https://github.com/RickKimball/msp430_code/blob/master/fabooh/examples/serial/dco_calibrate/goldilocks.cpp
 
 LICENSING:
