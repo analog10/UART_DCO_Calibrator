@@ -182,8 +182,8 @@ void xmit_char(uint8_t val){
 	while(tx_byte){
 		/* Output inverted logic (0 is high, 1 is low).
 		 * Output to bit 7 on port 2. */
-		register uint16_t tmp = 0x7F + (tx_byte & 0x1);
-		tmp &= 0x80;
+		register uint16_t tmp = ~TX_BIT + (tx_byte & 0x1);
+		tmp &= TX_BIT;
 		P2OUT = tmp | RX_BIT;
 
 		/* Use tmp as a delay counter now. */
