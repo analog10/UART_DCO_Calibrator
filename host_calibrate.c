@@ -279,28 +279,39 @@ int main(int argc, char **argv) {
 	if(rx != (OUT_RX_ACK | 0x3))
 		return -4;
 
+	/* Read dco, bcs values. */
+	struct {
+		uint32_t estimate;
+		uint32_t variance;
+		uint8_t dco;
+		uint8_t bcs;
+	} result;
 
 	while(keep_running){
 		ret = xmit_recv(fd, &rx, 0x55);
 		if(ret)
 			return ret;
 
-		if(OUT_MIN == rx){
-			fprintf(stderr, "Cannot reach frequency; too low\n");
-			break;
-		}
-		else if(OUT_MAX == rx){
-			fprintf(stderr, "Cannot reach frequency; too high\n");
+		if(OUT_MAX == rx || OUT_MIN == rx){
+			fprintf(stderr, (OUT_MIN == rx)
+					? "Cannot reach frequency; too low\n"
+					: "Cannot reach frequency; too high\n");
+
+			unsigned count = 0;
+			while(count < 8){
+				ret = read(fd, (uint8_t*)(&result) + count, sizeof(result)  - count);
+				count += ret;
+			}
+
+			result.estimate = le32toh(result.estimate);
+			fprintf(stderr, "\n\nESTIMATE  VARIANCE\n");
+			printf("%8u  %8.1lf\n"
+				,result.estimate ,(double)result.variance / 10.0);
+
+			fprintf(stderr, "\n\nSTDDEV: %lf\n", sqrt((double)result.variance / 10.0));
 			break;
 		}
 		else if(OUT_FINISH == rx){
-			/* Read dco, bcs values. */
-			struct {
-				uint32_t estimate;
-				uint32_t variance;
-				uint8_t dco;
-				uint8_t bcs;
-			} result;
 
 			unsigned count = 0;
 			while(count < 10){
