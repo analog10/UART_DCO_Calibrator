@@ -5,6 +5,7 @@
 #define OUT_DCO_DECREMENT (0xa1)
 #define OUT_RSEL_INCREMENT (0xb2)
 #define OUT_RSEL_DECREMENT (0xa2)
+#define OUT_DCO_MAXED     (0xb3)
 #define OUT_MAX (0xbf)
 #define OUT_MIN (0xaf)
 #define OUT_FINISH (0xcc)
