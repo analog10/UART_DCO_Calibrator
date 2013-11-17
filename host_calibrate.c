@@ -328,8 +328,10 @@ int main(int argc, char **argv) {
 			break;
 		}
 		else if(OUT_MOD_INCREMENT == (rx & 0xF0)){
+			usleep(100);
 		}
 		else if(OUT_MOD_DECREMENT == (rx & 0xF0)){
+			usleep(100);
 		}
 		else{
 			fprintf(stderr, "BAD RX %02hhx\n", rx);
