@@ -25,7 +25,7 @@ enum {
 	/** @brief Host is sending configuration data (target frequency). */
 	ST_CONFIGURE
 	,ST_SURVEY
-	,ST_HOME
+	,ST_DIAGNOSTIC
 	,ST_FINISHED
 };
 
@@ -275,6 +275,27 @@ int main(void){
 
 			state = ST_CONFIGURE;
 		}
+		else if(ST_DIAGNOSTIC == state){
+			/* Frequency estimate. */
+			xmit_char(last_estimate & 0xFF);
+			last_estimate >>= 8;
+			xmit_char(last_estimate & 0xFF);
+			last_estimate >>= 8;
+			xmit_char(last_estimate & 0xFF);
+			last_estimate >>= 8;
+			xmit_char(last_estimate & 0xFF);
+
+			/* Estimated error from true frequency. */
+			xmit_char(last_var & 0xFF);
+			last_var >>= 8;
+			xmit_char(last_var & 0xFF);
+			last_var >>= 8;
+			xmit_char(last_var & 0xFF);
+			last_var >>= 8;
+			xmit_char(last_var & 0xFF);
+
+			state = ST_CONFIGURE;
+		}
 
 		while(1){
 			/* Prepare to listen at the test frequency. */
@@ -411,7 +432,7 @@ int main(void){
 
 			if(OUT_MAX == tx || OUT_MIN == tx){
 				/* Reached extreme, cannot go any further. */
-				state = ST_CONFIGURE;
+				state = ST_DIAGNOSTIC;
 			}
 		}
 	}
