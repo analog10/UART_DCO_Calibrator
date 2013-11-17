@@ -298,15 +298,15 @@ int main(int argc, char **argv) {
 					: "Cannot reach frequency; too high\n");
 
 			unsigned count = 0;
-			while(count < 8){
+			while(count < 10){
 				ret = read(fd, (uint8_t*)(&result) + count, sizeof(result)  - count);
 				count += ret;
 			}
 
 			result.estimate = le32toh(result.estimate);
-			fprintf(stderr, "\n\nESTIMATE  VARIANCE\n");
-			printf("%8u  %8.1lf\n"
-				,result.estimate ,(double)result.variance / 10.0);
+			fprintf(stderr, "\n\nDCO  BCS1CTL  ESTIMATE  VARIANCE\n");
+			printf("%02hhx   %02hhx       %8u  %8.1lf\n"
+				,result.dco ,result.bcs ,result.estimate ,(double)result.variance / 10.0);
 
 			fprintf(stderr, "\n\nSTDDEV: %lf\n", sqrt((double)result.variance / 10.0));
 			break;

@@ -33,7 +33,7 @@ enum {
 volatile uint16_t one_count;
 
 /* Host configured target frequency. */
-uint32_t cfg_target_frequency = (360L * 44100L);
+uint32_t cfg_target_frequency = 16000000UL;
 uint32_t last_estimate = 0;
 uint16_t last_var = 0;
 
@@ -51,26 +51,6 @@ uint8_t state = ST_CONFIGURE;
 
 /* Increment the dco and bcs values. */
 uint8_t increment_values(uint8_t last){
-
-	if(OUT_START == last || OUT_RSEL_INCREMENT == last){
-		/* Increment by RSEL. */
-		if((bcs & 0x0F) < 0x0F){
-			++bcs;
-			return OUT_RSEL_INCREMENT;
-		}
-		else{
-			/* Try incrementing the DCO. */
-			dco += 0x20;
-			return OUT_DCO_INCREMENT;
-		}
-	}
-	else if(OUT_RSEL_DECREMENT == last){
-		/* Our last operation was a decrement, so the local minimum is
-		 * at incremented RSEL value. Decrement the DCO though.
-		 * Report it as a net decrease in DCO value. */
-		++bcs;
-		return OUT_DCO_DECREMENT;
-	}
 
 	if(OUT_DCO_INCREMENT == last){
 		/* Changing mod bits at maximum DCO has no effect, but
@@ -108,26 +88,6 @@ uint8_t increment_values(uint8_t last){
 
 /* Decrement the dco and bcs values. */
 uint8_t decrement_values(uint8_t last){
-
-	if(OUT_START == last || OUT_RSEL_DECREMENT == last){
-		/* Decrement by RSEL. */
-		if((bcs & 0x0F) > 0x00){
-			--bcs;
-			return OUT_RSEL_DECREMENT;
-		}
-		else{
-			/* Try decrementing the DCO. */
-			dco -= 0x20;
-			return OUT_DCO_DECREMENT;
-		}
-	}
-	else if(OUT_RSEL_INCREMENT == last){
-		/* Our last operation was a increment, so the local minimum is
-		 * at decremented RSEL value. Increment the DCO though.
-		 * Report it as a net increase in DCO value. */
-		--bcs;
-		return OUT_DCO_INCREMENT;
-	}
 
 	if(OUT_DCO_DECREMENT == last){
 		/* Check DCO bound. */
@@ -215,8 +175,8 @@ int main(void){
 	BCSCTL3 |= LFXT1S_2; 
 
 	/* Initialize to almost center of frequency range.
-	 * Start at lowest DCO. */
-	dco = 0x00 | 0x10;
+	 * Start at lowest frequency value. */
+	dco = 0x0;
 	bcs = (BCSCTL1 & 0xF0) | 0x7;
 
 	/* Disable external crystal. */
@@ -237,6 +197,8 @@ int main(void){
 
 	P2IE = RX_BIT;
 	P2IFG = 0;
+
+	uint8_t rsel_search = 1;
 
 	/* Don't have a last estimate, so set it to max (frequency itself) */
 	uint32_t estimated_freq = 0;
@@ -275,30 +237,11 @@ int main(void){
 
 			state = ST_CONFIGURE;
 		}
-		else if(ST_DIAGNOSTIC == state){
-			/* Frequency estimate. */
-			xmit_char(last_estimate & 0xFF);
-			last_estimate >>= 8;
-			xmit_char(last_estimate & 0xFF);
-			last_estimate >>= 8;
-			xmit_char(last_estimate & 0xFF);
-			last_estimate >>= 8;
-			xmit_char(last_estimate & 0xFF);
-
-			/* Estimated error from true frequency. */
-			xmit_char(last_var & 0xFF);
-			last_var >>= 8;
-			xmit_char(last_var & 0xFF);
-			last_var >>= 8;
-			xmit_char(last_var & 0xFF);
-			last_var >>= 8;
-			xmit_char(last_var & 0xFF);
-
-			state = ST_CONFIGURE;
-		}
 
 		while(1){
 			/* Prepare to listen at the test frequency. */
+			BCSCTL1 = (BCSCTL1 & 0xF0) | 0x7;
+			DCOCTL = 0;
 			BCSCTL1 = bcs;
 			DCOCTL = dco;
 			bit_indx = 0;
@@ -370,13 +313,13 @@ int main(void){
 
 		/* Lifted from goldilocks.cpp */
     uint16_t i, avg=0;
-		for (i = 1; i < bit_indx; i++) {
+		for (i = 2; i < bit_indx; i++) {
 			unsigned bdur = cnts[i] - cnts[i - 1];
 			avg += bdur;
 		}
 
 		/* division filters the "noise" from time difference readings. */
-    avg /= BIT_COUNT - 1;
+    avg /= BIT_COUNT - 2;
 
 
 		/* Extrapolate what target frequency would be based on this sampling. */
@@ -391,10 +334,58 @@ int main(void){
 			: (cfg_target_frequency - estimated_freq);
 
 		uint16_t var = 0;
-		for(i = 1; i < bit_indx; i++) {
+		for(i = 2; i < bit_indx; i++) {
 			uint16_t d = cnts[i] - cnts[i - 1];
 			d = d > avg ? d - avg : avg - d;
 			var += d * d;
+		}
+
+		/* Scanning increasing RSEL ranges to find optimal RSEL value. */
+		if(1 == rsel_search){
+
+			/* If estimate is greater, then established rsel range. */
+			if(estimate_greater){
+				if(0 == dco){
+					/* This is exceptional. The previous RSEL range should overlap.
+					 * If the diff is not less than the baud rate then we have a problem.*/
+					if(diff < BAUD){
+						/* Lucky, found the solution. */
+						last_diff = diff;
+						last_estimate = estimated_freq;
+						last_var = var;
+
+						tx = OUT_FINISH;
+						state = ST_FINISHED;
+					}
+					else{
+						/* Problem... */
+						tx = OUT_OP_ERR;
+						state = ST_FINISHED;
+					}
+					continue;
+				}
+
+				/* Established the RSEL, go onto fine adjustment. */
+				rsel_search = 0;
+				tx = OUT_DCO_DECREMENT;
+			}
+			else{
+				/* Checking dco extremes.. */
+				if(0 == dco){
+					dco = 0xFF;
+					tx = OUT_DCO_MAXED;
+				}
+				else{
+					++bcs;
+					dco = 0;
+					tx = OUT_RSEL_INCREMENT;
+				}
+
+				last_diff = diff;
+				last_estimate = estimated_freq;
+				last_var = var;
+				continue;
+			}
 		}
 
 		/* Since estimate is scaled by BAUD then
@@ -432,45 +423,31 @@ int main(void){
 
 			if(OUT_MAX == tx || OUT_MIN == tx){
 				/* Reached extreme, cannot go any further. */
-				state = ST_DIAGNOSTIC;
+				state = ST_FINISHED;
 			}
 		}
 	}
 
 	/* Run the processor at the new frequency, so that the
 	 * SMCLK frequency can be measured by oscope. */
+	BCSCTL1 = (BCSCTL1 & 0xF0) | 0x7;
+	DCOCTL = 0;
 	BCSCTL1 = bcs;
 	DCOCTL = dco;
 	while(1);
 }
 
-/* These numbers are derived from the following:
- *
- * 6 cycles of interrupt latency
- * 12 cycles to the if(!bit_indx) line
- *   10 cycles to the TAR assignment
- *   3 cycles to the v assignment
- *
- * The handler should probably be written in assembler,
- * but I'm lazy. Naken helped me count the clock cycles.
- * */
-#define INIT_START_BIAS (6 + 12 + 10)
-#define OTHER_START_BIAS (6 + 12 + 3)
 __attribute((interrupt(PORT2_VECTOR)))
 void Port_2(void){
+	register uint16_t v = TAR;
 
   if(!bit_indx){
 		/* Reset the timer.
 		 * Continuous up. */
 		TA0CTL = TASSEL_2 | ID_0 | MC_2 | TACLR | TAIE;
-		TAR = INIT_START_BIAS;
-
-		/* By definition, first count is at 0 */
-  	cnts[0] = 0;
   }
 	else{
-		register uint16_t v = TAR;
-  	cnts[bit_indx] = v - OTHER_START_BIAS;
+  	cnts[bit_indx] = v;
 		if(P2IN & RX_BIT)
 			++one_count;
 	}
@@ -479,8 +456,8 @@ void Port_2(void){
 	P2IES ^= RX_BIT;
 
   if ( ++bit_indx == BIT_COUNT ) { // last one? wake main line
-		/* Disable timer interrupt. */
-		TA0CTL &= ~(TAIE | TAIFG);
+		/* Disable the timer. */
+		TA0CTL = MC_0;
 		P2IES = RX_BIT;
     LPM0_EXIT;
   }
