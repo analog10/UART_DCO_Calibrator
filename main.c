@@ -404,9 +404,9 @@ int main(void){
 		 * */
 		if(last_diff < BAUD && diff > last_diff){
 			/* Last estimate was better, reverse what we did. */
-			if((tx & 0xF) == OUT_MOD_INCREMENT)
+			if((tx & 0xF0) == OUT_MOD_INCREMENT)
 				decrement_values(tx);
-			else if((tx & 0xF) == OUT_MOD_DECREMENT)
+			else if((tx & 0xF0) == OUT_MOD_DECREMENT)
 				increment_values(tx);
 			else{
 				/* FIXME If we didn't increment or decrement, wtf did we do? */
