@@ -16,8 +16,8 @@
 #define BIT_COUNT 10
 
 enum {
-	TX_BIT = BIT7
-	,RX_BIT = BIT6
+	TX_BIT = BIT2
+	,RX_BIT = BIT1
 };
 
 /* Possible states. */
@@ -140,14 +140,10 @@ void xmit_char(uint8_t val){
 	tx_byte |= 0x200;
 
 	while(tx_byte){
-		/* Output inverted logic (0 is high, 1 is low).
-		 * Output to bit 7 on port 2. */
-		register uint16_t tmp = ~TX_BIT + (tx_byte & 0x1);
-		tmp &= TX_BIT;
-		P2OUT = tmp | RX_BIT;
+		P1OUT = (tx_byte & 0x1) ? (TX_BIT | RX_BIT) : RX_BIT;
 
 		/* Use tmp as a delay counter now. */
-		tmp = BIT_DELAY;
+		register uint16_t tmp = BIT_DELAY;
 
 		/* Busy wait */
 		__asm__ __volatile__ (
@@ -183,20 +179,17 @@ int main(void){
 	P2SEL = 0;
 
 	/* Setup RX_BIT, our UART input bit. */
-	P2DIR = TX_BIT;
-	P2OUT = 0;
-	P2OUT |= TX_BIT;
-	P2OUT |= RX_BIT;
-	P2REN = ~TX_BIT;
-	P2IES = RX_BIT;
+	P1DIR = TX_BIT;
+	P1OUT = TX_BIT | RX_BIT;
+	P1REN = ~TX_BIT;
+	P1IES = RX_BIT;
 
 	/* Enable SMCLK on P1.4 */
-	P1OUT &= ~BIT4;
-	P1DIR = BIT4;
+	P1DIR |= BIT4;
 	P1SEL = BIT4;
 
-	P2IE = RX_BIT;
-	P2IFG = 0;
+	P1IE = RX_BIT;
+	P1IFG = 0;
 
 	uint8_t rsel_search = 1;
 
@@ -248,7 +241,7 @@ int main(void){
 			one_count = 0;
 			for(unsigned i = 0; i < BIT_COUNT; ++i)
 				cnts[i] = 0;
-			P2IFG = 0;
+			P1IFG = 0;
 
 			/* Now wait for host char */
 			__eint();
@@ -437,8 +430,8 @@ int main(void){
 	while(1);
 }
 
-__attribute((interrupt(PORT2_VECTOR)))
-void Port_2(void){
+__attribute((interrupt(PORT1_VECTOR)))
+void Port_1(void){
 	register uint16_t v = TAR;
 
   if(!bit_indx){
@@ -448,21 +441,21 @@ void Port_2(void){
   }
 	else{
   	cnts[bit_indx] = v;
-		if(P2IN & RX_BIT)
+		if(P1IN & RX_BIT)
 			++one_count;
 	}
 
 	/* Switch edge trigger so we get called on next transition */
-	P2IES ^= RX_BIT;
+	P1IES ^= RX_BIT;
 
   if ( ++bit_indx == BIT_COUNT ) { // last one? wake main line
 		/* Disable the timer. */
 		TA0CTL = MC_0;
-		P2IES = RX_BIT;
+		P1IES = RX_BIT;
     LPM0_EXIT;
   }
 
-	P2IFG = 0;
+	P1IFG = 0;
 }
 
 __attribute__((interrupt(TIMER0_A1_VECTOR)))
@@ -474,7 +467,7 @@ void timeout_detect(void){
 	if(bit_indx < BIT_COUNT){
 		/* Timed out. At 16MHz, the timeout is 4ms, which should be plenty.
 		 * Reset edge direction and wake up cpu. */
-		P2IES = RX_BIT;
+		P1IES = RX_BIT;
     LPM0_EXIT;
 	}
 }
